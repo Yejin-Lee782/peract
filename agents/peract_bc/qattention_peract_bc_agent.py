@@ -26,6 +26,8 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 NAME = 'QAttentionAgent'
 
+#Q-learning 알고리즘을 기반으로 하는 신경망 모듈
+#3D 좌표의 변환(transaltion), 회전(rotation), 그립(grip), 충돌방지(collosion) 상태 등을 예측
 
 class QFunction(nn.Module):
 
@@ -45,13 +47,15 @@ class QFunction(nn.Module):
         # distributed training
         if training:
             self._qnet = DDP(self._qnet, device_ids=[device])
-
+    #점군(point cloud) 데이터를 받아 이를 3차원 복셀(voxel) 그리드로 변환한 뒤, 주어진 상태에서 최적의 
+    #행동을 선택하는 역할
     def _argmax_3d(self, tensor_orig):
         b, c, d, h, w = tensor_orig.shape  # c will be one
         idxs = tensor_orig.view(b, c, -1).argmax(-1)
         indices = torch.cat([((idxs // h) // d), (idxs // h) % w, idxs % w], 1)
         return indices
 
+    #예측된 Q값에서 최적의 행동(좌표, 회전, 충돌)을 선택함.
     def choose_highest_action(self, q_trans, q_rot_grip, q_collision):
         coords = self._argmax_3d(q_trans)
         rot_and_grip_indicies = None
@@ -69,6 +73,7 @@ class QFunction(nn.Module):
             ignore_collision = q_collision[:, -2:].argmax(-1, keepdim=True)
         return coords, rot_and_grip_indicies, ignore_collision
 
+    #입력을 받아서 네트워크를 통해 Q-값(행동의 가치)을 예측하는 함수
     def forward(self, rgb_pcd, proprio, pcd, lang_goal_emb, lang_token_embs,
                 bounds=None, prev_bounds=None, prev_layer_voxel_grid=None):
         # rgb_pcd will be list of list (list of [rgb, pcd])

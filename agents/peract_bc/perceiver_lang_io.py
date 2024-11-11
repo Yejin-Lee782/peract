@@ -13,6 +13,16 @@ from einops import rearrange, repeat, reduce
 from einops.layers.torch import Reduce
 
 from helpers.network_utils import DenseBlock, SpatialSoftmax3D, Conv3DBlock, Conv3DUpsampleBlock
+from linformer_pytorch import LinearAttentionHead, get_EF
+
+def gen_causal_mask(input_size, dim_k, full_attention=False):
+    """
+    Generates a causal mask of size (input_size, dim_k) for linformer
+    Else, it generates (input_size, input_size) for full attention
+    """
+    if full_attention:
+        return (torch.triu(torch.ones(input_size, input_size))==1).transpose(0,1)
+    return (torch.triu(torch.ones(dim_k, input_size))==1).transpose(0,1)
 
 # helpers
 
@@ -130,6 +140,8 @@ class Attention(nn.Module):
         out = einsum('b i j, b j d -> b i d', attn, v)
         out = rearrange(out, '(b h) n d -> b n (h d)', h=h)
         return self.to_out(out)
+
+
 
 
 # PerceiverIO adapted for 6-DoF manipulation
@@ -258,9 +270,54 @@ class PerceiverVoxelLangEncoder(nn.Module):
             PreNorm(latent_dim, FeedForward(latent_dim))
         ])
 
-        get_latent_attn = lambda: PreNorm(latent_dim,
-                                          Attention(latent_dim, heads=latent_heads,
-                                                    dim_head=latent_dim_head, dropout=attn_dropout))
+        
+        # #Process 단계의 self-attention layer
+        # get_latent_attn = lambda: PreNorm(latent_dim,
+        #                                   Attention(latent_dim, heads=latent_heads,
+        #                                             dim_head=latent_dim_head, dropout=attn_dropout))
+        # 기존 Attention 클래스를 LinearAttentionHead 클래스로 교체
+
+
+        # Modify the `get_latent_attn` function to use `LinearAttentionHead`
+        def get_latent_attn(latent_dim, latent_heads, latent_dim_head, attn_dropout, input_size, dim_k, method="learnable"):
+            # Initialize E_proj and F_proj using helper functions #input_size
+            E_proj = get_EF(input_size=2048, dim=dim_k, method=method, head_dim=2048)
+            #F_proj = get_EF(input_size=2048, dim=512, method=method, head_dim=latent_dim_head)
+            F_proj = get_EF(input_size=2048, dim=512, method=method, head_dim=2048)
+
+            
+            
+            # Generate causal mask (if needed)
+            causal_mask = gen_causal_mask(input_size, dim_k)
+
+            # Return the `LinearAttentionHead` wrapped in `PreNorm`
+            return lambda: PreNorm(
+                latent_dim,
+                LinearAttentionHead(
+                    dim=latent_dim,
+                    dropout=attn_dropout,
+                    E_proj=E_proj,
+                    F_proj=F_proj,
+                    causal_mask=causal_mask,
+                    full_attention=False  # Set to True if full attention is needed
+                )
+            )
+
+        # 기존 코드에서 람다 함수 대체
+        get_latent_attn = get_latent_attn(
+            latent_dim=latent_dim,
+            latent_heads=latent_heads,
+            latent_dim_head=latent_dim_head,
+            attn_dropout=attn_dropout,
+            input_size=voxel_size,  # 적절한 input_size로 설정
+            dim_k=latent_dim,  # dim_k 값을 모델에 맞게 조정
+            method="learnable"  # 원하는 초기화 방법 설정
+        )
+
+        
+        
+        
+        
         get_latent_ff = lambda: PreNorm(latent_dim, FeedForward(latent_dim))
         get_latent_attn, get_latent_ff = map(cache_fn, (get_latent_attn, get_latent_ff))
 
@@ -347,13 +404,19 @@ class PerceiverVoxelLangEncoder(nn.Module):
     ):
         # preprocess input
         d0 = self.input_preprocess(ins)                       # [B,10,100,100,100] -> [B,64,100,100,100]
+        print(f"Input after preprocessing (d0): {d0.shape}")
+
 
         # aggregated features from 1st softmax and maxpool for MLP decoders
         feats = [self.ss0(d0.contiguous()), self.global_maxp(d0).view(ins.shape[0], -1)]
+        print(f"Aggregated features (feats) after 1st softmax and maxpool: {[f.shape for f in feats]}")
+
 
         # patchify input (5x5x5 patches)
         ins = self.patchify(d0)                               # [B,64,100,100,100] -> [B,64,20,20,20]
-
+        print(f"Input after patchify (ins): {ins.shape}")
+        
+        
         b, c, d, h, w, device = *ins.shape, ins.device
         axis = [d, h, w]
         assert len(axis) == self.input_axis, 'input must have the same number of axis as input_axis'
@@ -363,6 +426,7 @@ class PerceiverVoxelLangEncoder(nn.Module):
             p = self.proprio_preprocess(proprio)              # [B,4] -> [B,64]
             p = p.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).repeat(1, 1, d, h, w)
             ins = torch.cat([ins, p], dim=1)                  # [B,128,20,20,20]
+            print(f"Input after concatenating proprioception (ins): {ins.shape}")
 
         # language ablation
         if self.no_language:
@@ -376,13 +440,16 @@ class PerceiverVoxelLangEncoder(nn.Module):
             l = self.lang_preprocess(lang_emb)
             l = l.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).repeat(1, 1, d, h, w)
             ins = torch.cat([ins, l], dim=1)
+            print(f"Input after concatenating language goal (ins): {ins.shape}")
 
         # channel last
         ins = rearrange(ins, 'b d ... -> b ... d')            # [B,20,20,20,128]
+        print(f"Input rearranged to channel last (ins): {ins.shape}")
 
         # add pos encoding to grid
         if not self.pos_encoding_with_lang:
             ins = ins + self.pos_encoding
+            print(f"Input after adding positional encoding (ins): {ins.shape}")
 
         ######################## NOTE #############################
         # NOTE: If you add positional encodings ^here the lang embs
@@ -402,70 +469,114 @@ class PerceiverVoxelLangEncoder(nn.Module):
 
         # rearrange input to be channel last
         ins = rearrange(ins, 'b ... d -> b (...) d')          # [B,8000,128]
+        print(f"Input flattened to sequence (ins): {ins.shape}")
         ins_wo_prev_layers = ins
 
         # option 2: add lang token embs as a sequence
         if self.lang_fusion_type == 'seq':
             l = self.lang_preprocess(lang_token_embs)         # [B,77,1024] -> [B,77,128]
             ins = torch.cat((l, ins), dim=1)                  # [B,8077,128]
+            print(f"Input after adding language tokens as a sequence (ins): {ins.shape}")
+
 
         # add pos encoding to language + flattened grid (the recommended way)
         if self.pos_encoding_with_lang:
             ins = ins + self.pos_encoding
+            print(f"Input after adding positional encoding with language (ins): {ins.shape}")
+
 
         # batchify latents
         x = repeat(self.latents, 'n d -> b n d', b=b)
+        print(f"Latent vectors after batchifying (x): {x.shape}")
 
+        
+        print("Starting cross-attention iterations")
         cross_attn, cross_ff = self.cross_attend_blocks
 
         for it in range(self.iterations):
+            print(f"Iteration {it+1}/{self.iterations}")
+            
             # encoder cross attention
             x = cross_attn(x, context=ins, mask=mask) + x
-            x = cross_ff(x) + x
+            print(f"Cross-attention output shape (Iteration {it+1}): {x.shape}")
 
-            # self-attention layers
-            for self_attn, self_ff in self.layers:
+            x = cross_ff(x) + x
+            print(f"Feedforward output shape after cross-attention (Iteration {it+1}): {x.shape}")
+
+
+            # Self-attention layers
+            for layer_idx, (self_attn, self_ff) in enumerate(self.layers):
+                print(f"  Layer {layer_idx+1}/{self.depth} - Self-attention")
                 x = self_attn(x) + x
+                print(f"  Self-attention output shape (Layer {layer_idx+1}): {x.shape}")
+
                 x = self_ff(x) + x
+                print(f"  Feedforward output shape after self-attention (Layer {layer_idx+1}): {x.shape}")
 
         # decoder cross attention
         latents = self.decoder_cross_attn(ins, context=x)
+        print(f"Decoder cross-attention output shape: {latents.shape}")
+
 
         # crop out the language part of the output sequence
         if self.lang_fusion_type == 'seq':
             latents = latents[:, l.shape[1]:]
+            print(f"Latents after cropping language part: {latents.shape}")
+
 
         # reshape back to voxel grid
         latents = latents.view(b, *queries_orig_shape[1:-1], latents.shape[-1]) # [B,20,20,20,64]
         latents = rearrange(latents, 'b ... d -> b d ...')                      # [B,64,20,20,20]
+        print(f"Latent reshaped to voxel grid: {latents.shape}")
+
 
         # aggregated features from 2nd softmax and maxpool for MLP decoders
         feats.extend([self.ss1(latents.contiguous()), self.global_maxp(latents).view(b, -1)])
+        print(f"Aggregated features after 2nd softmax and maxpool: {[f.shape for f in feats]}")
+
 
         # upsample
         u0 = self.up0(latents)
+        print(f"Upsampled latent (u0): {u0.shape}")
+
 
         # ablations
         if self.no_skip_connection:
             u = self.final(u0)
+            print("Using no_skip_connection")
         elif self.no_perceiver:
             u = self.final(d0)
+            print("Using no_perceiver")
         else:
             u = self.final(torch.cat([d0, u0], dim=1))
+            print(f"Concatenated input and upsampled latent (u): {u.shape}")
 
         # translation decoder
         trans = self.trans_decoder(u)
+        print(f"Translation decoder output (trans): {trans.shape}")
+
 
         # rotation, gripper, and collision MLPs
         rot_and_grip_out = None
         if self.num_rotation_classes > 0:
             feats.extend([self.ss_final(u.contiguous()), self.global_maxp(u).view(b, -1)])
+            print(f"Features for rotation/grip/collision (feats): {[f.shape for f in feats]}")
+
 
             dense0 = self.dense0(torch.cat(feats, dim=1))
+            print(f"Dense layer 0 output (dense0): {dense0.shape}")
+
             dense1 = self.dense1(dense0)                     # [B,72*3+2+2]
+            print(f"Dense layer 1 output (dense1): {dense1.shape}")
+
+            
 
             rot_and_grip_collision_out = self.rot_grip_collision_ff(dense1)
+            print(f"Rotation, grip, collision output (rot_and_grip_collision_out): {rot_and_grip_collision_out.shape}")
+
             rot_and_grip_out = rot_and_grip_collision_out[:, :-self.num_collision_classes]
             collision_out = rot_and_grip_collision_out[:, -self.num_collision_classes:]
+            print(f"Rotation and grip output: {rot_and_grip_out.shape}")
+            print(f"Collision output: {collision_out.shape}")
 
         return trans, rot_and_grip_out, collision_out
