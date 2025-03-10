@@ -1,5 +1,8 @@
 # Perceiver-Actor
 
+## notion
+notion link : https://www.notion.so/Peract-4c93332cd6aa475ead6ffea56dc6679a
+
 [**Perceiver-Actor: A Multi-Task Transformer for Robotic Manipulation**](https://arxiv.org/abs/2209.05451)  
 [Mohit Shridhar](https://mohitshridhar.com/), [Lucas Manuelli](http://lucasmanuelli.com/), [Dieter Fox](https://homes.cs.washington.edu/~fox/)  
 [CoRL 2022](https://www.robot-learning.org/) 
