@@ -1,4 +1,4 @@
-# Perceiver-Actor
+# Perceiver-Actor-L
 
 ## notion
 notion link : (https://www.notion.so/Peract-1b2a9983848e809399c7d4c54d0410fe)
