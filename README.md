@@ -1,5 +1,4 @@
-# PerActor-L
-
+# Perceiver-Actor
 
 [**Perceiver-Actor: A Multi-Task Transformer for Robotic Manipulation**](https://arxiv.org/abs/2209.05451)  
 [Mohit Shridhar](https://mohitshridhar.com/), [Lucas Manuelli](http://lucasmanuelli.com/), [Dieter Fox](https://homes.cs.washington.edu/~fox/)  
@@ -7,7 +6,7 @@
 
 PerAct is an end-to-end behavior cloning agent that learns to perform a wide variety of language-conditioned manipulation tasks. PerAct uses a Transformer that exploits the 3D structure of _voxel patches_ to learn policies with just a few demonstrations per task.
 
-<img width="858" height="280" alt="image" src="https://github.com/user-attachments/assets/2566dfeb-c664-4fc6-b7ff-6375bc70b165" />
+![](media/sim_tasks.gif)
 
 The best entry-point for understanding PerAct is [this Colab Tutorial](https://colab.research.google.com/drive/1HAqemP4cE81SQ6QO1-N85j5bF4C0qLs0?usp=sharing). If you just want to apply PerAct to your problem, then start with the notebook, otherwise this repo is for mostly reproducing  RLBench results from the paper. 
 
@@ -590,7 +589,3 @@ Thanks for open-sourcing!
 ## Questions or Issues?
 
 Please file an issue with the issue tracker.  
-
-## notion
-notion link : (https://www.notion.so/Peract-1b2a9983848e809399c7d4c54d0410fe)
-
