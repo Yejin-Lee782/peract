@@ -1,8 +1,5 @@
 # PerActor-L
 
-## notion
-notion link : (https://www.notion.so/Peract-1b2a9983848e809399c7d4c54d0410fe)
-
 
 [**Perceiver-Actor: A Multi-Task Transformer for Robotic Manipulation**](https://arxiv.org/abs/2209.05451)  
 [Mohit Shridhar](https://mohitshridhar.com/), [Lucas Manuelli](http://lucasmanuelli.com/), [Dieter Fox](https://homes.cs.washington.edu/~fox/)  
@@ -593,3 +590,7 @@ Thanks for open-sourcing!
 ## Questions or Issues?
 
 Please file an issue with the issue tracker.  
+
+## notion
+notion link : (https://www.notion.so/Peract-1b2a9983848e809399c7d4c54d0410fe)
+
